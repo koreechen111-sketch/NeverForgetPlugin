@@ -1,0 +1,31 @@
+{
+  "name": "NeverForgetPluginMarketplace",
+  "description": "NeverForget插件市场配置",
+  "owner": {
+    "name": "koree"
+  },
+  "plugins": [
+    {
+      "name": "never-forget-plugin",
+      "description": "NeverForget 是一个 Claude Code 插件，通过 SQLite 持久化存储每条对话消息，在上下文压缩时采用层次 DAG 结构捕获摘要（支持多级压缩与展开），同时提供 MCP 工具让 AI 能够按需检索和恢复被压缩的原始上下文，实现真正的无损上下文管理。",
+      "version": "1.0.1",
+      "source": "./",
+      "author": {
+        "name": "koree",
+        "email": "koreechen111@gmail.com"
+      },
+      "keywords": [
+        "claude-code",
+        "context-management",
+        "mcp",
+        "lcm",
+        "context",
+        "memory",
+        "compaction",
+        "history",
+        "sqlite"
+      ],
+      "license": "MIT"
+    }
+  ]
+}
