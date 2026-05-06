@@ -1,6 +1,4 @@
-Never Forget Plugin
-
-# 软件设计文档
+# Never Forget Plugin 软件设计文档
 
 **版本**: 1.0.1
 **更新日期**: 2026-05-05
