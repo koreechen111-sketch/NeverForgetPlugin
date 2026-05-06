@@ -1,32 +1,41 @@
 /**
  * MCP tool definitions and handlers for LCM retrieval and self-managed compaction.
+ * MCP tool.
+ * 包含 lcm_grep、lcm_describe、lcm_expand、lcm_expand_query、lcm_llm_map、lcm_files、lcm_task_create、lcm_task_list、lcm_task_update 等工具
  */
 
+// 导入核心类型：检索引擎、会话存储、任务存储、LCM配置、文件存储
 import type { RetrievalEngine } from '../core/retrieval-engine.js';
 import type { ConversationStore } from '../core/conversation-store.js';
 import type { TaskStore } from '../core/task-store.js';
 import type { LcmConfig } from '../db/config.js';
 import type { FileStore } from '../core/file-store.js';
+// 导入LLM批量处理工具
 import { llmMap } from '../core/llm-map.js';
+// 导入Node原生路径处理模块
 import path from 'node:path';
 
+// MCP工具运行时的完整上下文
 export interface ToolContext {
-  engine: RetrievalEngine;
-  conversationStore: ConversationStore;
-  taskStore: TaskStore;
-  config: LcmConfig;
-  fileStore: FileStore;
+  engine: RetrievalEngine;// 检索引擎实例：处理grep、describe、expand等核心检索
+  conversationStore: ConversationStore;// 会话存储实例：操作会话、消息
+  taskStore: TaskStore;// 任务存储实例：操作任务的创建、查询、更新
+  config: LcmConfig;// LCM完整配置对象
+  fileStore: FileStore;// 文件存储实例：操作大文件元数据
 }
 
+// MCP工具的标准定义结构
 export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: object;
+  name: string;// 工具名称，如lcm_grep
+  description: string;// 工具功能描述，给LLM看的
+  inputSchema: object;// 工具输入参数的JSON Schema定义
   handler: (args: Record<string, unknown>, ctx: ToolContext) => unknown | Promise<unknown>;
 }
 
+// 所有LCM MCP工具的完整定义数组
 export const tools: ToolDefinition[] = [
   {
+    // 工具1：lcm_grep - 全文检索LCM保存的完整对话历史
     name: 'lcm_grep',
     description:
       'Search the full conversation history preserved by LCM. Returns matching messages grouped by the summary node that currently covers them. Use an optional summary_id to restrict search to a specific summary\'s scope.',
@@ -54,18 +63,21 @@ export const tools: ToolDefinition[] = [
       },
       required: ['query'],
     },
+    // lcm_grep的处理函数
     handler(args, { engine }) {
+      // 提取并校验输入参数
       const query = args['query'] as string;
       const conversationId = args['conversation_id'] as string | undefined;
       const summaryId = args['summary_id'] as string | undefined;
       const limit = Math.min(200, Math.max(1, (args['limit'] as number | undefined) ?? 20));
 
+      // 调用检索引擎的grep方法执行搜索
       const results = engine.grep(query, conversationId, limit, summaryId);
       if (results.length === 0) {
         return { found: false, message: `No results found for: ${query}` };
       }
 
-      // Group results by covering summary (per LCM paper spec)
+      // 按覆盖摘要分组结果（符合LCM论文规范）
       const groups = new Map<string, typeof results>();
       for (const r of results) {
         const key = r.coveringSummaryId ?? '__uncovered__';
@@ -73,6 +85,7 @@ export const tools: ToolDefinition[] = [
         groups.get(key)!.push(r);
       }
 
+      // 组装并返回分组后的结果
       return {
         found: true,
         count: results.length,
@@ -91,6 +104,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具2：lcm_describe - 根据ID获取特定摘要或消息的元数据和内容
   {
     name: 'lcm_describe',
     description:
@@ -105,6 +119,7 @@ export const tools: ToolDefinition[] = [
       },
       required: ['id'],
     },
+    // lcm_describe的处理函数
     handler(args, { engine }) {
       const id = args['id'] as string;
       const result = engine.describe(id);
@@ -115,6 +130,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具3：lcm_expand - 检索压缩成摘要的原始消息
   {
     name: 'lcm_expand',
     description:
@@ -139,6 +155,7 @@ export const tools: ToolDefinition[] = [
       },
       required: ['summary_id'],
     },
+    // lcm_expand的处理函数
     handler(args, { engine }) {
       const summaryId = args['summary_id'] as string;
       const depth = Math.min(5, Math.max(1, (args['depth'] as number | undefined) ?? 1));
@@ -166,6 +183,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具4：lcm_expand_query - 搜索内容并立即展开相关摘要
   {
     name: 'lcm_expand_query',
     description:
@@ -190,6 +208,7 @@ export const tools: ToolDefinition[] = [
       },
       required: ['query'],
     },
+    // lcm_expand_query的处理函数
     handler(args, { engine }) {
       const query = args['query'] as string;
       const maxResults = Math.min(10, Math.max(1, (args['max_results'] as number | undefined) ?? 3));
@@ -218,6 +237,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具5：lcm_llm_map - 通过LLM提示模板批量处理JSONL文件
   {
     name: 'lcm_llm_map',
     description:
@@ -254,7 +274,9 @@ export const tools: ToolDefinition[] = [
       },
       required: ['input_path', 'prompt_template'],
     },
+    // lcm_llm_map的异步处理函数
     async handler(args, ctx) {
+      // 检查API Key是否配置
       const apiKey = ctx.config.anthropicApiKey;
       if (!apiKey) {
         throw new Error(
@@ -262,8 +284,10 @@ export const tools: ToolDefinition[] = [
         );
       }
 
+      // 提取输入参数
       const inputPath = args['input_path'] as string;
       const promptTemplate = args['prompt_template'] as string;
+      // 生成默认输出路径：输入路径同目录，后缀改为.out.jsonl
       const outputPath =
         (args['output_path'] as string | undefined) ??
         path.join(path.dirname(inputPath), path.basename(inputPath, path.extname(inputPath)) + '.out.jsonl');
@@ -271,6 +295,8 @@ export const tools: ToolDefinition[] = [
       const maxConcurrency = args['max_concurrency'] as number | undefined;
       const outputSchema = args['output_schema'] as Record<string, unknown> | undefined;
 
+      
+      // 调用核心llmMap工具执行批量处理
       return llmMap({
         inputPath,
         outputPath,
@@ -283,6 +309,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具6：lcm_files - 列出和查询对话中检测到的大文件
   {
     name: 'lcm_files',
     description:
@@ -304,11 +331,13 @@ export const tools: ToolDefinition[] = [
         },
       },
     },
+    // lcm_files的处理函数
     handler(args, { fileStore }) {
       const fileId = args['file_id'] as string | undefined;
       const conversationId = args['conversation_id'] as string | undefined;
       const query = args['query'] as string | undefined;
 
+      // 按文件ID查询单个文件详情
       if (fileId) {
         const file = fileStore.getFile(fileId);
         if (!file) {
@@ -317,6 +346,7 @@ export const tools: ToolDefinition[] = [
         return { found: true, file };
       }
 
+      // 按会话ID列出所有大文件
       if (conversationId) {
         const files = fileStore.getFilesForConversation(conversationId);
         return {
@@ -326,6 +356,7 @@ export const tools: ToolDefinition[] = [
         };
       }
 
+      // 仅提供query时提示需要同时提供conversation_id
       if (query) {
         return {
           found: false,
@@ -333,10 +364,12 @@ export const tools: ToolDefinition[] = [
         };
       }
 
+      // 未提供任何有效参数时返回提示
       return { found: false, message: 'Provide file_id, conversation_id, or query' };
     },
   },
 
+  // 工具7：lcm_task_create - 创建任务以跟踪委托工作
   {
     name: 'lcm_task_create',
     description:
@@ -371,6 +404,7 @@ export const tools: ToolDefinition[] = [
       },
       required: ['conversation_id', 'title'],
     },
+    // lcm_task_create的处理函数
     handler(args, { taskStore }) {
       const task = taskStore.createTask({
         conversationId: args['conversation_id'] as string,
@@ -384,6 +418,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具8：lcm_task_list - 列出任务，支持按会话、状态、父任务筛选
   {
     name: 'lcm_task_list',
     description: 'List tasks for tracking delegated work. Filter by conversation, status, or parent task.',
@@ -404,6 +439,7 @@ export const tools: ToolDefinition[] = [
         },
       },
     },
+    // lcm_task_list的处理函数
     handler(args, { taskStore }) {
       const tasks = taskStore.listTasks({
         conversationId: args['conversation_id'] as string | undefined,
@@ -414,6 +450,7 @@ export const tools: ToolDefinition[] = [
     },
   },
 
+  // 工具9：lcm_task_update - 更新任务状态或结果
   {
     name: 'lcm_task_update',
     description: 'Update a task status or result. Use to mark tasks completed, failed, or record results.',
@@ -443,6 +480,7 @@ export const tools: ToolDefinition[] = [
       },
       required: ['task_id'],
     },
+    // lcm_task_update的处理函数
     handler(args, { taskStore }) {
       const task = taskStore.updateTask(args['task_id'] as string, {
         status: args['status'] as string | undefined,
